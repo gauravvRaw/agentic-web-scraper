@@ -13,7 +13,34 @@ TARGET_COUNT = 30
 # Star rating words used by the site
 RATING_MAP = {"One": 1, "Two": 2, "Three": 3, "Four": 4, "Five": 5}
 
-async def scrape(limit: int = TARGET_COUNT) -> list[dict]:
+# All fields the scraper knows how to collect
+ALL_FIELDS = {"name", "price", "rating"}
+
+
+async def scrape(
+    limit: int = TARGET_COUNT,
+    fields: list[str] | None = None,
+) -> list[dict]:
+    """
+    Scrape books from books.toscrape.com.
+
+    Args:
+        limit:  Maximum number of books to return.
+        fields: Which fields to collect.  Defaults to all fields.
+                Must be a subset of {"name", "price", "rating"}.
+                "name" is always included regardless.
+
+    Returns:
+        List of dicts, each containing only the requested fields.
+    """
+    if fields is None:
+        fields = list(ALL_FIELDS)
+
+    # Normalise: always include name, drop unknowns
+    requested = {"name"} | (set(fields) & ALL_FIELDS)
+    want_price  = "price"  in requested
+    want_rating = "rating" in requested
+
     options = ChromiumOptions()
     options.add_argument("--no-sandbox")
     options.add_argument("--window-size=1920,1080")
@@ -32,7 +59,6 @@ async def scrape(limit: int = TARGET_COUNT) -> list[dict]:
             await tab.go_to(url)
             await asyncio.sleep(2)
 
-            # Each book is in an <article class="product_pod">
             articles = await tab.find(
                 tag_name="article", find_all=True, raise_exc=False
             ) or []
@@ -44,7 +70,7 @@ async def scrape(limit: int = TARGET_COUNT) -> list[dict]:
                     break
 
                 try:
-                    # Title is in <h3><a title="...">
+                    # ── Name (always scraped) ──────────────────────────────
                     title_el = await article.query("h3 a", raise_exc=False)
                     name = ""
                     if title_el:
@@ -52,45 +78,47 @@ async def scrape(limit: int = TARGET_COUNT) -> list[dict]:
                     if not name:
                         continue
 
-                    # Price is in <p class="price_color">
-                    price = ""
-                    try:
-                        price_el = await article.query("p.price_color", raise_exc=False)
-                        if price_el:
-                            # Use execute_script to get the text content since
-                            # get_attribute() only reads HTML attributes, not DOM properties
-                            result = await price_el.execute_script(
-                                "return this.textContent", return_by_value=True
+                    record: dict = {"name": name}
+
+                    # ── Price (optional) ───────────────────────────────────
+                    if want_price:
+                        price = ""
+                        try:
+                            price_el = await article.query(
+                                "p.price_color", raise_exc=False
                             )
-                            price = (
-                                result.get("result", {})
-                                .get("result", {})
-                                .get("value", "") or ""
-                            ).strip()
-                    except Exception:
-                        pass
+                            if price_el:
+                                result = await price_el.execute_script(
+                                    "return this.textContent",
+                                    return_by_value=True,
+                                )
+                                price = (
+                                    result.get("result", {})
+                                    .get("result", {})
+                                    .get("value", "") or ""
+                                ).strip()
+                        except Exception:
+                            pass
+                        record["price"] = price
 
-                    # Rating is a word class on <p class="star-rating One/Two/...">
-                    rating = None
-                    try:
-                        rating_el = await article.query("p.star-rating", raise_exc=False)
-                        if rating_el:
-                            # class_name is the correct pydoll property (pydoll
-                            # stores the HTML "class" attribute under "class_name")
-                            cls = rating_el.class_name or ""
-                            # cls is e.g. "star-rating Three"
-                            for word, val in RATING_MAP.items():
-                                if word in cls:
-                                    rating = val
-                                    break
-                    except Exception:
-                        pass
+                    # ── Rating (optional) ──────────────────────────────────
+                    if want_rating:
+                        rating = None
+                        try:
+                            rating_el = await article.query(
+                                "p.star-rating", raise_exc=False
+                            )
+                            if rating_el:
+                                cls = rating_el.class_name or ""
+                                for word, val in RATING_MAP.items():
+                                    if word in cls:
+                                        rating = val
+                                        break
+                        except Exception:
+                            pass
+                        record["rating"] = rating
 
-                    products.append({
-                        "name": name,
-                        "price": price,
-                        "rating": rating,
-                    })
+                    products.append(record)
                     new_products += 1
 
                 except Exception as e:
@@ -125,7 +153,13 @@ async def main():
     print(f"Saved to: {output_path}\n")
 
     for i, p in enumerate(products, 1):
-        print(f"{i:>2}. {p['name'][:55]:<55}  Rating: {p['rating']}/5  Price: {p['price']}")
+        rating_str = f"{p.get('rating', '?')}/5" if "rating" in p else ""
+        price_str  = p.get("price", "")
+        print(
+            f"{i:>2}. {p['name'][:55]:<55}"
+            + (f"  Rating: {rating_str}" if rating_str else "")
+            + (f"  Price: {price_str}"  if price_str  else "")
+        )
 
 
 if __name__ == "__main__":
