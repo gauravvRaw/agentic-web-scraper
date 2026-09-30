@@ -21,20 +21,6 @@ MODEL = "openai/gpt-4o-mini"   # fast & cheap; change to any OpenRouter model
 load_dotenv()
 
 def _load_api_key() -> str:
-    """
-    Read the OpenRouter API key.
-    Priority:
-      1. Streamlit secrets  (.streamlit/secrets.toml  →  OPENROUTER_API_KEY)
-      2. Environment variable  OPENROUTER_API_KEY
-    """
-    # load_dotenv()
-    # try:
-    #     import streamlit as st
-    #     key = st.secrets.get("OPENROUTER_API_KEY", "")
-    #     if key and key != "sk-or-your-key-here":
-    #         return key
-    # except Exception:
-    #     return os.getenv("OPENROUTER_API_KEY")
     return os.getenv("OPENROUTER_API_KEY")
 
 
@@ -61,7 +47,7 @@ AVAILABLE_FIELDS = {
 }
 
 
-# ── Step 1: parse the question into a scraping plan ───────────────────────────
+# give the plan
 PARSE_SYSTEM_PROMPT = f"""You are a planning agent for a book scraper.
 The scraper can collect any combination of these fields from books.toscrape.com:
 
@@ -128,7 +114,7 @@ def parse_question(question: str) -> dict:
     return plan
 
 
-# ── Step 2: answer the question given the scraped data ────────────────────────
+# System prompt 
 ANSWER_SYSTEM_PROMPT = """You are a helpful data analyst.
 You will be given a user question and a JSON array of book records scraped from books.toscrape.com.
 Answer the question clearly and concisely using only the data provided.
